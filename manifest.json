@@ -1,9 +1,9 @@
 {
-	"id": "habit-tracker-21",
-	"name": "Habit Tracker 21",
-	"version": "2.4.1",
+	"id": "habit-tracker-21-skips",
+	"name": "Habit Tracker 21 (Skip Days)",
+	"version": "2.5.0",
 	"minAppVersion": "1.1.0",
-	"description": "Your 21-day journey to habit formation, simplified",
+	"description": "Your 21-day journey to habit formation, simplified. Fork with skip days.",
 	"author": "zincplusplus",
 	"authorUrl": "https://github.com/zincplusplus",
 	"isDesktopOnly": false,
