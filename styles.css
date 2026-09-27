@@ -362,6 +362,28 @@ div:has(.block-language-habittracker),
 	color: inherit;
 }
 
+/* Skipped day: striped tick. Doesn't count towards the streak, doesn't break it either */
+.habit-tick--skipped .habit-tick__inner {
+	background: repeating-linear-gradient(
+		-45deg,
+		color-mix(in srgb, var(--habit-bg-ticked) 75%, transparent) 0 2px,
+		color-mix(in srgb, var(--habit-bg-ticked) 15%, transparent) 2px 5px
+	);
+}
+.habit-tick--skipped:not(.habit-tick--streak) .habit-tick__inner {
+	border-radius: var(--habit-tick-roundess);
+}
+
+/* Counter on a skipped day: striped background, full-color text */
+.habit-tick--streak-skip.habit-tick--streak-end .habit-tick__inner,
+.habit-tick--streak-skip.habit-tick--streak-count .habit-tick__inner {
+	color: inherit;
+	text-shadow:
+		0 0 2px var(--habit-bg),
+		0 0 2px var(--habit-bg),
+		0 0 3px var(--habit-bg);
+}
+
 /* Deadline day: faded tick to hint the streak is about to break */
 .habit-tick--streak-deadline .habit-tick__inner {
 	background: color-mix(in srgb, var(--habit-bg-ticked) 30%, transparent);

@@ -13,6 +13,7 @@ Transform your [Obsidian](https://obsidian.md) vault into a habit-building power
 - **Easy to setup** - Matches your theme effortlessly using Obsidian CSS variables and includes sensible defaults for all tracker properties
 - **Smart Folder Support** - Track individual files or entire habit folders
 - **Flexible Streak Counting** - Optional gap tolerance (`maxGap`) keeps streaks intact across short breaks while counting only days you actually completed
+- **Skip Days** - Mark a day as skipped (sick, travelling, rest day) so it doesn't break your streak. Skipped days show as striped ticks
 - **Daily Note Integration** - Click any date in the header to jump straight to your daily note for that day
 - **Debug Mode** - Comprehensive debugging gives you all the info you need to figure it out
 
@@ -97,6 +98,36 @@ entries: []
 | Call a friend or family member | Weekly | `6` | One call per week, any day |
 | Car service / deep clean | Monthly | `30` | Up to 30 days between occurrences |
 
+### Skip Days
+
+Sometimes a day just doesn't apply: you're sick, travelling, or it's a planned rest day. Mark it as **skipped** and your streak survives.
+
+Clicking a cell cycles through three states:
+
+1. **Empty** → click → **Done**
+2. **Done** → click → **Skipped** (striped)
+3. **Skipped** → click → **Empty**
+
+Skipped days:
+
+- Don't break a streak. The streak bar continues through them with a striped fill
+- Don't add to the streak count. Only days you actually completed are counted
+- Don't use up your `maxGap` allowance, and they push the "last day to keep your streak alive" hint back
+- Keep an ongoing streak visible when you skip the days right after your last completed day (e.g. skipping today)
+
+Skipped dates are stored in a `skips` list next to `entries`:
+
+```markdown
+---
+title: "Morning Workout 💪"
+entries:
+  - 2024-11-01
+  - 2024-11-03
+skips:
+  - 2024-11-02
+---
+```
+
 ## Configuration
 
 ### Global Settings
@@ -149,6 +180,7 @@ Override global settings in individual code blocks:
 | `color`   | string | ""      | Custom color for this habit (hex, RGB, or CSS color name)                                    |
 | `maxGap`  | number | 0       | Allow up to N consecutive missed days within a streak. Gap days show at reduced opacity; only actual ticked days are counted |
 | `entries` | array  | []      | Array of completed dates in YYYY-MM-DD format. Managed automatically when clicking the grid  |
+| `skips`   | array  | []      | Array of skipped dates in YYYY-MM-DD format. Skipped days don't break a streak and aren't counted. Managed automatically when clicking the grid |
 
 ## Usage Examples
 

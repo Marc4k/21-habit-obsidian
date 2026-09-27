@@ -4,7 +4,7 @@
 	import {onDestroy} from 'svelte'
 	import {parseYaml, TFile} from 'obsidian'
 	import {getDayOfTheWeek} from './utils'
-	import {differenceInCalendarDays, parseISO, format} from 'date-fns'
+	import {addDays, differenceInCalendarDays, parseISO, format} from 'date-fns'
 
 	export let app
 	export let name
@@ -16,6 +16,7 @@
 	export let globalSettings
 
 	let entries = []
+	let skips = [] // days that don't count towards a streak but don't break it either
 	let frontmatter = {}
 	let habitName = name
 	let customStyles = ''
@@ -39,36 +40,49 @@
 	$: renderedDates = (() => {
 		const maxGap = Number(frontmatter.maxGap) || 0
 		const entrySet = new Set(entries)
+		const skipSet = new Set(skips)
 		const gapStyle =
 			userSettings.gapStyle !== undefined
 				? userSettings.gapStyle
 				: globalSettings.gapStyle
 
+		const shiftDate = (date, amount) =>
+			format(addDays(parseISO(date), amount), 'yyyy-MM-dd')
+
+		// Missed days strictly between two dates. Skipped days are not missed.
+		const missedBetween = (from, to) =>
+			differenceInCalendarDays(parseISO(to), parseISO(from)) -
+			1 -
+			skips.filter((s) => s > from && s < to && !entrySet.has(s)).length
+
+		// A non-ticked date belongs to a streak when it sits between two entries
+		// whose missed days are within maxGap, or when it is part of an unbroken
+		// run of skipped days right after an entry.
+		const isBridged = (date) => {
+			let prev = null
+			let next = null
+			for (const entry of entries) {
+				if (entry < date) prev = entry
+				else if (entry > date) {
+					next = entry
+					break
+				}
+			}
+			if (!prev) return false
+			if (next && missedBetween(prev, next) <= maxGap) return true
+			return skipSet.has(date) && missedBetween(prev, date) === 0
+		}
+
+		const inStreak = (date) => entrySet.has(date) || isBridged(date)
+
 		// Pass 1 — mark each date
 		const days = dates.map((date) => {
 			const ticked = entrySet.has(date)
-			let gap = false
-			if (!ticked && maxGap > 0) {
-				// Gap only between consecutive entries whose gap ≤ maxGap
-				const parsed = parseISO(date)
-				for (let i = 0; i < entries.length - 1; i++) {
-					const prev = parseISO(entries[i])
-					const next = parseISO(entries[i + 1])
-					if (
-						differenceInCalendarDays(parsed, prev) > 0 &&
-						differenceInCalendarDays(next, parsed) > 0
-					) {
-						if (differenceInCalendarDays(next, prev) - 1 <= maxGap) {
-							gap = true
-						}
-						break
-					}
-				}
-			}
 			return {
 				date,
 				ticked,
-				gap,
+				skipped: !ticked && skipSet.has(date),
+				gap: !ticked && isBridged(date),
 				deadline: false,
 				title: '',
 				streakStart: false,
@@ -81,78 +95,37 @@
 		// Pass 2 — identify streak boundaries and counts
 		let streakStartIdx = -1
 		for (let i = 0; i <= days.length; i++) {
-			const inStreak = i < days.length && (days[i].ticked || days[i].gap)
-			if (inStreak && streakStartIdx === -1) {
+			const inRun = i < days.length && (days[i].ticked || days[i].gap)
+			if (inRun && streakStartIdx === -1) {
 				streakStartIdx = i
-			} else if (!inStreak && streakStartIdx !== -1) {
+			} else if (!inRun && streakStartIdx !== -1) {
 				// Streak just ended at i-1
 				const endIdx = i - 1
+				const firstDate = days[streakStartIdx].date
+				const lastDate = days[endIdx].date
 
-				// Find first and last ticked dates in this visible run
-				let firstTickDate = null
-				let lastTickDate = null
-				for (let j = streakStartIdx; j <= endIdx; j++) {
-					if (days[j].ticked) {
-						if (!firstTickDate) firstTickDate = days[j].date
-						lastTickDate = days[j].date
-					}
-				}
-
-				// streakStart: only if the streak truly begins here
-				// (no entry within maxGap before the first visible date)
-				if (firstTickDate) {
-					const firstTickIdx = entries.indexOf(firstTickDate)
-					const prevEntry = firstTickIdx > 0 ? entries[firstTickIdx - 1] : null
-					const continuesFromBefore =
-						prevEntry &&
-						differenceInCalendarDays(
-							parseISO(firstTickDate),
-							parseISO(prevEntry),
-						) -
-							1 <=
-							maxGap
-					if (!continuesFromBefore) {
-						days[streakStartIdx].streakStart = true
-					}
-				} else {
+				// Only round off ends that fall inside the visible range
+				if (!inStreak(shiftDate(firstDate, -1))) {
 					days[streakStartIdx].streakStart = true
 				}
-
-				// streakEnd: only if the streak truly ends within the visible range
-				if (lastTickDate) {
-					const lastTickIdx = entries.indexOf(lastTickDate)
-					const nextEntry =
-						lastTickIdx < entries.length - 1 ? entries[lastTickIdx + 1] : null
-					const continuesAfter =
-						nextEntry &&
-						differenceInCalendarDays(
-							parseISO(nextEntry),
-							parseISO(lastTickDate),
-						) -
-							1 <=
-							maxGap
-					if (!continuesAfter) {
-						days[endIdx].streakEnd = true
-					}
-				} else {
+				if (!inStreak(shiftDate(lastDate, 1))) {
 					days[endIdx].streakEnd = true
 				}
 
-				// Count: walk backward through entries from the last visible tick
+				// Count: walk backward through entries from the last entry in this streak
+				let anchorIdx = -1
+				for (let j = entries.length - 1; j >= 0; j--) {
+					if (entries[j] <= lastDate) {
+						anchorIdx = j
+						break
+					}
+				}
 				let count = 0
-				if (lastTickDate) {
-					const anchorIdx = entries.indexOf(lastTickDate)
-					if (anchorIdx !== -1) {
-						count = 1
-						for (let j = anchorIdx; j > 0; j--) {
-							const gapDays =
-								differenceInCalendarDays(
-									parseISO(entries[j]),
-									parseISO(entries[j - 1]),
-								) - 1
-							if (gapDays > maxGap) break
-							count++
-						}
+				if (anchorIdx !== -1) {
+					count = 1
+					for (let j = anchorIdx; j > 0; j--) {
+						if (missedBetween(entries[j - 1], entries[j]) > maxGap) break
+						count++
 					}
 				}
 
@@ -162,14 +135,16 @@
 			}
 		}
 
-		// Pass 3 — ghost dot on the last day of the gap (deadline to keep streak alive)
+		// Pass 3 — ghost dot on the last day of the gap (deadline to keep streak alive).
+		// Skipped days push the deadline back.
 		if (maxGap > 0 && entries.length > 0) {
 			const today = format(new Date(), 'yyyy-MM-dd')
-			const lastEntry = entries[entries.length - 1]
-			const deadlineDate = format(
-				new Date(parseISO(lastEntry).getTime() + (maxGap + 1) * 86400000),
-				'yyyy-MM-dd',
-			)
+			let deadlineDate = entries[entries.length - 1]
+			let missed = 0
+			while (missed <= maxGap) {
+				deadlineDate = shiftDate(deadlineDate, 1)
+				if (!skipSet.has(deadlineDate)) missed++
+			}
 			if (deadlineDate >= today) {
 				const ghostDay = days.find((d) => d.date === deadlineDate)
 				if (ghostDay && !ghostDay.ticked) {
@@ -186,10 +161,13 @@
 				'habit-tick',
 			]
 			if (day.ticked) cls.push('habit-tick--ticked')
+			if (day.skipped) cls.push('habit-tick--skipped')
 			if (showStreaks) {
 				const inStrk = day.ticked || day.gap
 				if (inStrk) cls.push('habit-tick--streak')
-				if (day.gap && !day.ticked) {
+				if (day.skipped && day.gap) {
+					cls.push('habit-tick--streak-skip')
+				} else if (day.gap && !day.ticked) {
 					cls.push('habit-tick--streak-gap')
 					cls.push(gapStyle === 'faded' ? 'habit-tick--gap-faded' : 'habit-tick--gap-default')
 				}
@@ -251,6 +229,9 @@
 		debugLog(frontmatter, debug)
 		entries = frontmatter.entries
 		entries = entries.sort()
+		skips = Array.isArray(frontmatter.skips)
+			? [...new Set(frontmatter.skips)].sort()
+			: []
 		habitName = frontmatter.title || habitName
 
 		debugLog(`Habit "${habitName}": Found ${entries.length} entries`, debug)
@@ -264,18 +245,29 @@
 			return
 		}
 
+		// Click cycle: empty → ticked → skipped → empty
 		let newEntries = [...entries]
+		let newSkips = [...skips]
 		if (entries.includes(date)) {
 			newEntries = newEntries.filter((e) => e !== date)
+			newSkips.push(date)
+		} else if (skips.includes(date)) {
+			newSkips = newSkips.filter((s) => s !== date)
 		} else {
 			newEntries.push(date)
 		}
 		entries = newEntries.sort()
+		skips = newSkips.sort()
 
 		savingChanges = true
 
 		this.app.fileManager.processFrontMatter(file, (frontmatter) => {
 			frontmatter['entries'] = entries
+			if (skips.length) {
+				frontmatter['skips'] = skips
+			} else {
+				delete frontmatter['skips']
+			}
 		})
 	}
 
