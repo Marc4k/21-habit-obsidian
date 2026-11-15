@@ -223,6 +223,32 @@ div:has(.block-language-habittracker),
 	display: inline-block;
 	font-size: var(--habit-name-font-size);
 	text-decoration: none;
+	min-width: 0;
+}
+
+.habit-tracker__cell--name .habit-joker-balance {
+	flex: 0 0 auto;
+	margin-left: 6px;
+	padding: 1px 5px;
+	height: 22px;
+	font-size: 10px;
+	line-height: 18px;
+	border-radius: 5px;
+}
+.habit-joker-balance:disabled {
+	opacity: 0.65;
+}
+.habit-tracker__cell--name .habit-joker-balance--active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+.habit-tracker__row:has(.habit-joker-balance--active) .habit-tick {
+	outline: 1px dashed var(--interactive-accent);
+	outline-offset: -3px;
+}
+.habit-joker-warning {
+	color: var(--text-warning);
+	margin-left: 4px;
 }
 .is-readable-line-width
 	.habit-tracker--match-line-length
@@ -388,6 +414,16 @@ div:has(.block-language-habittracker),
 .habit-tick--streak-deadline .habit-tick__inner {
 	background: color-mix(in srgb, var(--habit-bg-ticked) 30%, transparent);
 	border-radius: var(--habit-tick-roundess);
+}
+
+/* Keep Joker usage legible with streaks enabled or disabled, including endpoints. */
+.habit-tick--joker .habit-tick__inner {
+	background: var(--background-primary);
+	box-shadow: inset 0 0 0 1px var(--habit-bg-ticked);
+	color: var(--text-normal);
+	height: var(--habit-tick-size);
+	font-weight: 700;
+	text-shadow: none;
 }
 
 .ht21-tooltip {

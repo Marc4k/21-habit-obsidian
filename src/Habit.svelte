@@ -2,7 +2,8 @@
 	import {debugLog, isValidCSSColor} from './utils'
 
 	import {onDestroy} from 'svelte'
-	import {parseYaml, TFile} from 'obsidian'
+	import {Notice, parseYaml, TFile} from 'obsidian'
+	import {getJokerState, normalizeDates, updateHabitDay} from './jokers.mjs'
 	import {getDayOfTheWeek} from './utils'
 	import {addDays, differenceInCalendarDays, parseISO, format} from 'date-fns'
 
@@ -17,10 +18,16 @@
 
 	let entries = []
 	let skips = [] // days that don't count towards a streak but don't break it either
+	let jokerUses = []
+	let choosingJoker = false
 	let frontmatter = {}
 	let habitName = name
 	let customStyles = ''
 	let savingChanges = false // this helps the file change listner know if we made a change. if not, it reloads the data for the habit
+	let jokerState = getJokerState({})
+	// The parent refreshes dates at midnight, when future entries may become eligible.
+	$: if (dates) jokerState = getJokerState({...frontmatter, entries, skips, jokerUses})
+	$: protectedDays = [...new Set([...skips, ...jokerUses])].sort()
 
 	// Reactive color resolution - updates whenever frontmatter, userSettings, or globalSettings change
 	$: {
@@ -40,7 +47,8 @@
 	$: renderedDates = (() => {
 		const maxGap = Number(frontmatter.maxGap) || 0
 		const entrySet = new Set(entries)
-		const skipSet = new Set(skips)
+		const skipSet = new Set(protectedDays)
+		const jokerSet = new Set(jokerUses)
 		const gapStyle =
 			userSettings.gapStyle !== undefined
 				? userSettings.gapStyle
@@ -53,7 +61,7 @@
 		const missedBetween = (from, to) =>
 			differenceInCalendarDays(parseISO(to), parseISO(from)) -
 			1 -
-			skips.filter((s) => s > from && s < to && !entrySet.has(s)).length
+			protectedDays.filter((s) => s > from && s < to && !entrySet.has(s)).length
 
 		// A non-ticked date belongs to a streak when it sits between two entries
 		// whose missed days are within maxGap, or when it is part of an unbroken
@@ -82,6 +90,7 @@
 				date,
 				ticked,
 				skipped: !ticked && skipSet.has(date),
+				joker: jokerSet.has(date),
 				gap: !ticked && isBridged(date),
 				deadline: false,
 				title: '',
@@ -162,6 +171,7 @@
 			]
 			if (day.ticked) cls.push('habit-tick--ticked')
 			if (day.skipped) cls.push('habit-tick--skipped')
+			if (day.joker) cls.push('habit-tick--joker')
 			if (showStreaks) {
 				const inStrk = day.ticked || day.gap
 				if (inStrk) cls.push('habit-tick--streak')
@@ -187,7 +197,7 @@
 		debugLog(`Loading habit ${habitName}`, debug, undefined, pluginName)
 
 		const getFrontmatter = async function (path) {
-			const file = this.app.vault.getAbstractFileByPath(path)
+			const file = app.vault.getAbstractFileByPath(path)
 
 			if (!file || !(file instanceof TFile)) {
 				debugLog(
@@ -200,13 +210,13 @@
 			}
 
 			try {
-				return await this.app.vault.read(file).then((result) => {
-					const frontmatter = result.split('---')[1]
+				return await app.vault.read(file).then((result) => {
+					const frontmatter = result.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1]
 
 					if (!frontmatter) {
 						return {entries: []}
 					}
-					const fmParsed = parseYaml(frontmatter)
+					const fmParsed = parseYaml(frontmatter) || {}
 					if (fmParsed['entries'] == undefined) {
 						fmParsed['entries'] = []
 					}
@@ -227,48 +237,40 @@
 		frontmatter = await getFrontmatter(path)
 		debugLog(`Frontmatter for ${path} ↴`, debug)
 		debugLog(frontmatter, debug)
-		entries = frontmatter.entries
-		entries = entries.sort()
-		skips = Array.isArray(frontmatter.skips)
-			? [...new Set(frontmatter.skips)].sort()
-			: []
+		entries = normalizeDates(frontmatter.entries)
+		skips = normalizeDates(frontmatter.skips)
+		jokerUses = normalizeDates(frontmatter.jokerUses)
 		habitName = frontmatter.title || habitName
 
 		debugLog(`Habit "${habitName}": Found ${entries.length} entries`, debug)
 		debugLog(entries, debug, undefined, pluginName)
 	}
 
-	const toggleHabit = function (date) {
-		const file = this.app.vault.getAbstractFileByPath(path)
+	const toggleHabit = async function (date) {
+		if (savingChanges) return
+		const file = app.vault.getAbstractFileByPath(path)
 		if (!file || !(file instanceof TFile)) {
 			new Notice(`${pluginName}: file missing while trying to toggle habit`)
 			return
 		}
 
-		// Click cycle: empty → ticked → skipped → empty
-		let newEntries = [...entries]
-		let newSkips = [...skips]
-		if (entries.includes(date)) {
-			newEntries = newEntries.filter((e) => e !== date)
-			newSkips.push(date)
-		} else if (skips.includes(date)) {
-			newSkips = newSkips.filter((s) => s !== date)
-		} else {
-			newEntries.push(date)
-		}
-		entries = newEntries.sort()
-		skips = newSkips.sort()
-
 		savingChanges = true
-
-		this.app.fileManager.processFrontMatter(file, (frontmatter) => {
-			frontmatter['entries'] = entries
-			if (skips.length) {
-				frontmatter['skips'] = skips
-			} else {
-				delete frontmatter['skips']
-			}
-		})
+		try {
+			await app.fileManager.processFrontMatter(file, (fm) => {
+				const next = updateHabitDay(fm, date, choosingJoker ? 'joker' : 'cycle')
+				fm.entries = next.entries
+				for (const key of ['skips', 'jokerUses']) {
+					if (next[key].length) fm[key] = next[key]
+					else delete fm[key]
+				}
+			})
+			choosingJoker = false
+			await init()
+		} catch (error) {
+			new Notice(`${pluginName}: ${error.message}`)
+		} finally {
+			savingChanges = false
+		}
 	}
 
 	init()
@@ -298,10 +300,8 @@
 	const modifyRef = app.vault.on('modify', (file) => {
 		if (file.path === path) {
 			if (!savingChanges) {
-				console.log('oh shit, i was modified')
 				init()
 			}
-			savingChanges = false
 		}
 	})
 
@@ -310,6 +310,8 @@
 		hideTooltip()
 	})
 </script>
+
+<svelte:window on:keydown={(event) => { if (event.key === 'Escape') choosingJoker = false }} />
 
 <!-- <div bind:this={rootElement}> -->
 <div
@@ -322,21 +324,41 @@
 			aria-label={path}
 			class="internal-link">{habitName}</a
 		>
+		<button
+			class="habit-joker-balance"
+			class:habit-joker-balance--active={choosingJoker}
+			aria-pressed={choosingJoker}
+			disabled={savingChanges || (!choosingJoker && jokerState.balance === 0)}
+			title={choosingJoker ? 'Select a day to use one Joker. Click here or press Escape to cancel.' : `${jokerState.balance} Jokers available · ${jokerState.earned} earned · ${jokerState.used} used. Earn one every 30 completed streak days. Click to choose a day.`}
+			on:click={() => choosingJoker = !choosingJoker}
+		>Joker {jokerState.balance}</button>
+		{#if jokerState.errors.length}
+			<span class="habit-joker-warning" title={jokerState.errors.map((error) => `${error.date}: ${error.reason}`).join('\n')}>⚠</span>
+		{/if}
 	</div>
 	{#if renderedDates.length}
 		{#each renderedDates as day}
-			<!-- svelte-ignore a11y-no-static-element-interactions -->
-			<!-- svelte-ignore a11y-click-events-have-key-events -->
 			<div
 				class={day.classes}
+				role="button"
+				tabindex="0"
+				aria-label={`${habitName}, ${day.date}: ${day.joker ? 'Joker used. Activate to undo and refund.' : day.ticked ? 'Done' : day.skipped ? 'Skipped' : 'Empty'}${choosingJoker ? '. Use Joker on this day' : ''}`}
+				title={day.joker ? `${day.date}: Joker used (click to undo and refund)${showStreaks && day.streakCount > 1 ? ` · Streak: ${day.streakCount}` : ''}` : choosingJoker ? `${day.date}: Use one Joker` : day.date}
+				aria-disabled={savingChanges}
 				ticked={day.ticked}
 				on:mouseenter={(e) => showTooltip(e, day)}
 				on:mouseleave={hideTooltip}
 				on:click={() => toggleHabit(day.date)}
+				on:keydown={(event) => {
+					if (event.key === 'Enter' || event.key === ' ') {
+						event.preventDefault()
+						toggleHabit(day.date)
+					}
+				}}
 			>
 				<span
 					class="habit-tick__inner"
-				>{#if showStreaks && day.streakEnd && day.streakCount > 1}{day.streakCount}{/if}</span>
+					>{#if day.joker}J{:else if showStreaks && day.streakEnd && day.streakCount > 1}{day.streakCount}{/if}</span>
 			</div>
 		{/each}
 	{/if}

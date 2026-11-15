@@ -14,6 +14,7 @@ Transform your [Obsidian](https://obsidian.md) vault into a habit-building power
 - **Smart Folder Support** - Track individual files or entire habit folders
 - **Flexible Streak Counting** - Optional gap tolerance (`maxGap`) keeps streaks intact across short breaks while counting only days you actually completed
 - **Skip Days** - Mark a day as skipped (sick, travelling, rest day) so it doesn't break your streak. Skipped days show as striped ticks
+- **Habit Jokers** - Earn a stackable Joker every 30 completed streak days, spend it to protect a day, and see every use in the grid
 - **Daily Note Integration** - Click any date in the header to jump straight to your daily note for that day
 - **Debug Mode** - Comprehensive debugging gives you all the info you need to figure it out
 
@@ -128,6 +129,25 @@ skips:
 ---
 ```
 
+### Jokers
+
+Each habit automatically earns **1 Joker at 30, 60, 90… completed days within a streak**. Jokers stack for that habit and remain available after a streak breaks. Existing history counts, including dates outside the displayed grid. Separate broken streaks start their own progress toward 30.
+
+- The **Joker N** button beside the habit name shows the available balance. Hover for earned and used totals.
+- Click the button, then select an empty or skipped day to spend one Joker. Selected mode outlines the row's day cells; click the button again or press Escape to cancel.
+- A Joker day shows **J**, including when streak indicators are hidden. It protects the streak without adding a completed day toward the next reward, like a skip day.
+- **Two consecutive calendar days can never both use Jokers**, even with several available. This also applies when backdating a use.
+- Click a Joker day to undo it and refund the Joker. Changes that would leave a later use without sufficient earnings are blocked; undo the affected later uses first.
+- Future days and completed days cannot use Jokers. A backdated use requires a Joker earned before that date.
+- Existing skip days and `maxGap` keep their usual behavior; neither counts as a completed day toward earning a Joker.
+
+Uses are saved in the habit note's `jokerUses` list. Earned totals and balances are calculated from the complete history, so normal streak breaks never erase earned Jokers. Correcting old completion history recalculates earnings; the grid blocks corrections that would invalidate a saved use. Manual frontmatter edits with invalid uses show a warning beside the balance.
+
+```yaml
+jokerUses:
+  - 2026-11-14
+```
+
 ## Configuration
 
 ### Global Settings
@@ -181,6 +201,7 @@ Override global settings in individual code blocks:
 | `maxGap`  | number | 0       | Allow up to N consecutive missed days within a streak. Gap days show at reduced opacity; only actual ticked days are counted |
 | `entries` | array  | []      | Array of completed dates in YYYY-MM-DD format. Managed automatically when clicking the grid  |
 | `skips`   | array  | []      | Array of skipped dates in YYYY-MM-DD format. Skipped days don't break a streak and aren't counted. Managed automatically when clicking the grid |
+| `jokerUses` | array | []     | Dates on which a Joker was spent. Managed by the Joker button; displayed as J in the grid |
 
 ## Usage Examples
 
